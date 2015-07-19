@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <classpath>
- <classpathentry kind="src" path="src/java"/>
- <classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
- <classpathentry kind="lib" path="lib/testng/testng-5.5-jdk15.jar"/>
- <classpathentry kind="lib" path="lib/ant/bcel-5.2.jar"/>
- <classpathentry kind="output" path="bin"/>
+	<classpathentry kind="src" path="src/java"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="lib" path="lib/ant/bcel-5.2.jar"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/htsjdk"/>
+	<classpathentry kind="lib" path="lib/guava-15.0.jar"/>
+	<classpathentry kind="lib" path="lib/com-sun-javadoc.jar"/>
+	<classpathentry kind="output" path="bin"/>
 </classpath>
