@@ -11,3 +11,4 @@ intellij.classes
 htsjdk
 .idea
 target
+bin
