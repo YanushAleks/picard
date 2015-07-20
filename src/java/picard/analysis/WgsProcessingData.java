@@ -2,7 +2,6 @@ package picard.analysis;
 
 import java.util.HashSet;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
@@ -14,8 +13,6 @@ import htsjdk.samtools.util.SamLocusIterator;
 
 public class WgsProcessingData implements Runnable {
 
-	private AtomicBoolean endOfRead;
-	
 	private ReferenceSequenceFileWalker buferRefWalker;
 	private LinkedBlockingQueue<SamLocusIterator.LocusInfo> infoQueue;
 	private AtomicLong basesExcludedByBaseq;
@@ -39,10 +36,9 @@ public class WgsProcessingData implements Runnable {
 			AtomicLong basesExcludedByCapping, AtomicLongArray HistogramArray,
 			AtomicLongArray baseQHistogramArray, int MINIMUM_BASE_QUALITY, 
 			int max, final ProgressLogger progress, AtomicLong countNonNReads, 
-			AtomicBoolean endOfRead, boolean usingStopAfter) {
+			boolean usingStopAfter) {
 		
 		this.buferRefWalker = refWalker;
-		this.endOfRead = endOfRead;
 		this.infoQueue = infoQueue;
 		this.basesExcludedByBaseq = basesExcludedByBaseq;
 		this.basesExcludedByOverlap = basesExcludedByOverlap;
@@ -58,18 +54,17 @@ public class WgsProcessingData implements Runnable {
 	
 	@Override
 	public void run() {
-		while (!endOfRead.get() || infoQueue.size() != 0) {
+		while(true) {
 			SamLocusIterator.LocusInfo info = null;
-			
 			try {
-				info = infoQueue.poll(50, TimeUnit.MILLISECONDS);
+				info = infoQueue.take();
 			} catch (InterruptedException e) {
 				e.printStackTrace();
 				System.exit(1);
 			}
-            
-            //if queue is empty
-            if (info == null) continue;
+			
+            //exit
+            if (info.getPosition() == -1) return;
             
             //data processing
             final ReferenceSequence ref = buferRefWalker.get(info.getSequenceIndex());
@@ -96,19 +91,15 @@ public class WgsProcessingData implements Runnable {
                 pileupSize++;
                 if (pileupSize <= max) {
                     baseQHistogramArray.incrementAndGet(recs.getRecord().getBaseQualities()[recs.getOffset()]);
-                    //baseQHistogramArray[recs.getRecord().getBaseQualities()[recs.getOffset()]]++;
                 }
             }
             
             final int depth = Math.min(readNames.size(), max);
             if (depth < readNames.size())
                 basesExcludedByCapping.addAndGet(readNames.size() - max);
-            //basesExcludedByCapping += readNames.size() - max;
             
-            //HistogramArray[depth]++;
             HistogramArray.incrementAndGet(depth);
             
-            // Record progress and perhaps stop
             progress.record(info.getSequenceName(), info.getPosition());
         }
     }

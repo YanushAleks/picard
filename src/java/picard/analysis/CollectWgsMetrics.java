@@ -8,12 +8,14 @@ import htsjdk.samtools.filter.SamRecordFilter;
 import htsjdk.samtools.filter.SecondaryAlignmentFilter;
 import htsjdk.samtools.metrics.MetricBase;
 import htsjdk.samtools.metrics.MetricsFile;
+import htsjdk.samtools.reference.ReferenceSequence;
 import htsjdk.samtools.reference.ReferenceSequenceFileWalker;
 import htsjdk.samtools.util.Histogram;
 import htsjdk.samtools.util.IOUtil;
 import htsjdk.samtools.util.Log;
 import htsjdk.samtools.util.ProgressLogger;
 import htsjdk.samtools.util.SamLocusIterator;
+import htsjdk.samtools.util.SamLocusIterator.LocusInfo;
 import picard.cmdline.CommandLineProgram;
 import picard.cmdline.CommandLineProgramProperties;
 import picard.cmdline.Option;
@@ -23,6 +25,8 @@ import picard.util.MathUtil;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -164,14 +168,20 @@ public class CollectWgsMetrics extends CommandLineProgram {
         int queueSize = 30, processThreadNum = 5;
         LinkedBlockingQueue<SamLocusIterator.LocusInfo> infoQueue = new LinkedBlockingQueue<SamLocusIterator.LocusInfo>(queueSize);
         
-        AtomicBoolean endOfRead = new AtomicBoolean();
-        
         AtomicLong basesExcludedByBaseq = new AtomicLong();
         AtomicLong basesExcludedByOverlap = new AtomicLong();
         AtomicLong basesExcludedByCapping = new AtomicLong();
         AtomicLongArray HistogramArray = null;
         AtomicLongArray baseQHistogramArray = null;
         AtomicLong countNonNReads = new AtomicLong();
+        
+        //variables for monitoring state of reference sequence pull
+        long minContigIndex = 0, maxContigIndex = 1;
+        AtomicLongArray thCurContigIndex = new AtomicLongArray(processThreadNum);
+        AtomicBoolean ContigIndexBoundsChanged = new AtomicBoolean(false);
+        
+        //list contain reference sequence with contig index from minContigIndex to maxContigIndex + 1
+        LinkedList<ReferenceSequence> listRefSequence = new LinkedList<ReferenceSequence>();
         
         //***!!!***
         Thread[] processThread = new Thread[processThreadNum];
@@ -185,15 +195,16 @@ public class CollectWgsMetrics extends CommandLineProgram {
         HistogramArray = new AtomicLongArray(max + 1);// = new long[max + 1];
         baseQHistogramArray = new AtomicLongArray(Byte.MAX_VALUE);//new long[Byte.MAX_VALUE];
         
-        
+        //create and start threads for processing
         for (int i = 0; i < processThreadNum; i++) {
             processThread[i] = new Thread(new WgsProcessingData(refWalker, 
             		infoQueue, basesExcludedByBaseq, basesExcludedByOverlap, 
             		basesExcludedByCapping, HistogramArray, baseQHistogramArray, 
             		MINIMUM_BASE_QUALITY, max, progress, countNonNReads, 
-            		endOfRead, usingStopAfter));
+            		usingStopAfter));
             processThread[i].start();
         }
+        
         
         while (iterator.hasNext()) {
             try {
@@ -207,10 +218,18 @@ public class CollectWgsMetrics extends CommandLineProgram {
                 break;
         }
         
+        //adding pills
+        for(int i = 0; i < processThreadNum; i++) {
+        	try {
+				infoQueue.put(new SamLocusIterator.LocusInfo(null, -1));
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+				System.exit(1);
+			}
+        }
+        
         //close BAM file
         iterator.close();
-        //set flag, that read of file ended
-        endOfRead.set(true);
         
         //wait for end of work processing threads
         for (Thread th : processThread) {
