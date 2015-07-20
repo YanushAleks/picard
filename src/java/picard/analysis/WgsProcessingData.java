@@ -15,6 +15,7 @@ import htsjdk.samtools.util.SamLocusIterator;
 public class WgsProcessingData implements Runnable {
 
 	private AtomicBoolean endOfRead;
+	
 	private ReferenceSequenceFileWalker buferRefWalker;
 	private LinkedBlockingQueue<SamLocusIterator.LocusInfo> infoQueue;
 	private AtomicLong basesExcludedByBaseq;
@@ -30,12 +31,15 @@ public class WgsProcessingData implements Runnable {
 	private int max;
 	private final ProgressLogger progress;
 	
-	public WgsProcessingData(ReferenceSequenceFileWalker refWalker, AtomicBoolean endOfRead, 
+	private boolean usingStopAfter;
+	
+	public WgsProcessingData(ReferenceSequenceFileWalker refWalker, 
 			LinkedBlockingQueue<SamLocusIterator.LocusInfo> infoQueue, 
 			AtomicLong basesExcludedByBaseq, AtomicLong basesExcludedByOverlap,
 			AtomicLong basesExcludedByCapping, AtomicLongArray HistogramArray,
 			AtomicLongArray baseQHistogramArray, int MINIMUM_BASE_QUALITY, 
-			int max, final ProgressLogger progress, AtomicLong countNonNReads) {
+			int max, final ProgressLogger progress, AtomicLong countNonNReads, 
+			AtomicBoolean endOfRead, boolean usingStopAfter) {
 		
 		this.buferRefWalker = refWalker;
 		this.endOfRead = endOfRead;
@@ -49,6 +53,7 @@ public class WgsProcessingData implements Runnable {
 		this.max = max;
 		this.progress = progress;
 		this.countNonNReads = countNonNReads;
+		this.usingStopAfter = usingStopAfter;
 	}
 	
 	@Override
@@ -60,7 +65,7 @@ public class WgsProcessingData implements Runnable {
 				info = infoQueue.poll(50, TimeUnit.MILLISECONDS);
 			} catch (InterruptedException e) {
 				e.printStackTrace();
-				System.exit(2);
+				System.exit(1);
 			}
             
             //if queue is empty
@@ -70,7 +75,8 @@ public class WgsProcessingData implements Runnable {
             final ReferenceSequence ref = buferRefWalker.get(info.getSequenceIndex());
             final byte base = ref.getBases()[info.getPosition() - 1];
             if (base == 'N') {
-                this.countNonNReads.decrementAndGet();
+                if (this.usingStopAfter)
+                	this.countNonNReads.decrementAndGet();
                 continue;
             }
             

@@ -164,7 +164,8 @@ public class CollectWgsMetrics extends CommandLineProgram {
         int queueSize = 30, processThreadNum = 5;
         LinkedBlockingQueue<SamLocusIterator.LocusInfo> infoQueue = new LinkedBlockingQueue<SamLocusIterator.LocusInfo>(queueSize);
         
-        AtomicBoolean endOfRead = new AtomicBoolean(false);
+        AtomicBoolean endOfRead = new AtomicBoolean();
+        
         AtomicLong basesExcludedByBaseq = new AtomicLong();
         AtomicLong basesExcludedByOverlap = new AtomicLong();
         AtomicLong basesExcludedByCapping = new AtomicLong();
@@ -184,14 +185,15 @@ public class CollectWgsMetrics extends CommandLineProgram {
         HistogramArray = new AtomicLongArray(max + 1);// = new long[max + 1];
         baseQHistogramArray = new AtomicLongArray(Byte.MAX_VALUE);//new long[Byte.MAX_VALUE];
         
+        
         for (int i = 0; i < processThreadNum; i++) {
-            processThread[i] = new Thread(new WgsProcessingData(refWalker, endOfRead, 
-            		infoQueue, basesExcludedByBaseq, basesExcludedByBaseq, 
-            		basesExcludedByBaseq, HistogramArray, HistogramArray, MINIMUM_BASE_QUALITY, 
-        			max, progress, countNonNReads));
+            processThread[i] = new Thread(new WgsProcessingData(refWalker, 
+            		infoQueue, basesExcludedByBaseq, basesExcludedByOverlap, 
+            		basesExcludedByCapping, HistogramArray, baseQHistogramArray, 
+            		MINIMUM_BASE_QUALITY, max, progress, countNonNReads, 
+            		endOfRead, usingStopAfter));
             processThread[i].start();
         }
-        
         
         while (iterator.hasNext()) {
             try {
@@ -199,16 +201,16 @@ public class CollectWgsMetrics extends CommandLineProgram {
             } catch (InterruptedException e) {
                 System.err.println("inspect why exception occur while adding new element to queue");
                 e.printStackTrace();
+                System.exit(1);
             }
             if (usingStopAfter && countNonNReads.incrementAndGet() > stopAfter)
                 break;
         }
+        
         //close BAM file
         iterator.close();
         //set flag, that read of file ended
         endOfRead.set(true);
-        
-        System.out.println(countNonNReads);
         
         //wait for end of work processing threads
         for (Thread th : processThread) {
@@ -220,8 +222,6 @@ public class CollectWgsMetrics extends CommandLineProgram {
             }
         }
         
-        System.out.println(HistogramArray.length());
-        System.out.println(baseQHistogramArray.length());
         
         // Construct and write the outputs
         final Histogram<Integer> histo = new Histogram<Integer>("coverage", "count");
