@@ -176,7 +176,8 @@ public class CollectWgsMetrics extends CommandLineProgram {
         AtomicLong countNonNReads = new AtomicLong();
         
         //variables for monitoring state of reference sequence pull
-        long minContigIndex = 0, maxContigIndex = 1;
+        AtomicLong minContigIndex = new AtomicLong(0);
+        long maxContigIndex = 1;
         AtomicLongArray thCurContigIndex = new AtomicLongArray(processThreadNum);
         AtomicBoolean ContigIndexBoundsChanged = new AtomicBoolean(false);
         
@@ -204,6 +205,7 @@ public class CollectWgsMetrics extends CommandLineProgram {
             		usingStopAfter));
             processThread[i].start();
         }
+        
         
         
         while (iterator.hasNext()) {
