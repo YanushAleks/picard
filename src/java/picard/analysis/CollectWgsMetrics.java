@@ -8,14 +8,12 @@ import htsjdk.samtools.filter.SamRecordFilter;
 import htsjdk.samtools.filter.SecondaryAlignmentFilter;
 import htsjdk.samtools.metrics.MetricBase;
 import htsjdk.samtools.metrics.MetricsFile;
-import htsjdk.samtools.reference.ReferenceSequence;
 import htsjdk.samtools.reference.ReferenceSequenceFileWalker;
 import htsjdk.samtools.util.Histogram;
 import htsjdk.samtools.util.IOUtil;
 import htsjdk.samtools.util.Log;
 import htsjdk.samtools.util.ProgressLogger;
 import htsjdk.samtools.util.SamLocusIterator;
-import htsjdk.samtools.util.SamLocusIterator.LocusInfo;
 import picard.cmdline.CommandLineProgram;
 import picard.cmdline.CommandLineProgramProperties;
 import picard.cmdline.Option;
@@ -25,11 +23,8 @@ import picard.util.MathUtil;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 
@@ -174,15 +169,6 @@ public class CollectWgsMetrics extends CommandLineProgram {
         AtomicLongArray HistogramArray = null;
         AtomicLongArray baseQHistogramArray = null;
         AtomicLong countNonNReads = new AtomicLong();
-        
-        //variables for monitoring state of reference sequence pull
-        AtomicLong minContigIndex = new AtomicLong(0);
-        long maxContigIndex = 1;
-        AtomicLongArray thCurContigIndex = new AtomicLongArray(processThreadNum);
-        AtomicBoolean ContigIndexBoundsChanged = new AtomicBoolean(false);
-        
-        //list contain reference sequence with contig index from minContigIndex to maxContigIndex + 1
-        LinkedList<ReferenceSequence> listRefSequence = new LinkedList<ReferenceSequence>();
         
         //***!!!***
         Thread[] processThread = new Thread[processThreadNum];
