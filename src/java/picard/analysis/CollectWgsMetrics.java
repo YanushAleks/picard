@@ -8,6 +8,7 @@ import htsjdk.samtools.filter.SamRecordFilter;
 import htsjdk.samtools.filter.SecondaryAlignmentFilter;
 import htsjdk.samtools.metrics.MetricBase;
 import htsjdk.samtools.metrics.MetricsFile;
+import htsjdk.samtools.reference.ReferenceSequence;
 import htsjdk.samtools.reference.ReferenceSequenceFileWalker;
 import htsjdk.samtools.util.Histogram;
 import htsjdk.samtools.util.IOUtil;
@@ -22,9 +23,12 @@ import picard.cmdline.StandardOptionDefinitions;
 import picard.util.MathUtil;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 
@@ -179,22 +183,93 @@ public class CollectWgsMetrics extends CommandLineProgram {
         
         int max = COVERAGE_CAP;
         
+        Integer endOfRead = new Integer(1);
+        AtomicBoolean haveNewIndex = new AtomicBoolean();
+        AtomicLongArray thCurIndex = new AtomicLongArray(processThreadNum);
+        AtomicLong minIndex = new AtomicLong(0), maxIndex = new AtomicLong(1);
+        LinkedList<ReferenceSequence> listRefSeq = new LinkedList<ReferenceSequence>();
+        
+        
         HistogramArray = new AtomicLongArray(max + 1);// = new long[max + 1];
         baseQHistogramArray = new AtomicLongArray(Byte.MAX_VALUE);//new long[Byte.MAX_VALUE];
         
+        //read first 2 reference sequence
+        for (int i=0; i < 2; i++) {
+        	listRefSeq.add(refWalker.get(i));
+        }
+        
         //create and start threads for processing
         for (int i = 0; i < processThreadNum; i++) {
-            processThread[i] = new Thread(new WgsProcessingData(refWalker, 
-            		infoQueue, basesExcludedByBaseq, basesExcludedByOverlap, 
-            		basesExcludedByCapping, HistogramArray, baseQHistogramArray, 
-            		MINIMUM_BASE_QUALITY, max, progress, countNonNReads, 
-            		usingStopAfter));
+            processThread[i] = new Thread(new WgsProcessingData(listRefSeq, 
+            		thCurIndex, haveNewIndex, minIndex, infoQueue, basesExcludedByBaseq, 
+            		basesExcludedByOverlap, basesExcludedByCapping, HistogramArray, 
+            		baseQHistogramArray, MINIMUM_BASE_QUALITY, max, progress, 
+            		countNonNReads, usingStopAfter, i));
             processThread[i].start();
         }
         
-        
+        //thread for read 
+        /*
+        (new Thread(new Runnable() {
+			@Override
+			public void run() {
+				while (true) {
+					if (haveNewIndex.get()) {
+						long newMin = thCurIndex.get(0), newMax = thCurIndex.get(0), buf;
+						for(int i = 1; i < processThreadNum; i++) {
+							buf = thCurIndex.get(i);
+							if (newMin > buf) newMin = buf;
+							if (newMax < buf) newMax = buf;
+						}
+						buf = minIndex.get();
+						if (buf < newMin) {
+							while (buf < newMin) {
+								listRefSeq.removeFirst();
+							}
+							minIndex.set(newMin);
+						}
+						buf = maxIndex.get();
+						if (buf < newMax + 1) {
+							int i = (int)buf;
+							while(buf > newMax) {
+								listRefSeq.add(refWalker.get(i++));
+							}
+							maxIndex.set(newMax);
+						}
+					}
+				}
+			}
+		})).run();
+        */
         
         while (iterator.hasNext()) {
+        	if (haveNewIndex.get()) {
+        		System.out.println("Min index = " + minIndex.get() + ", max index = " + maxIndex.get());
+				long newMin = thCurIndex.get(0), newMax = thCurIndex.get(0), buf;
+				for(int i = 1; i < processThreadNum; i++) {
+					buf = thCurIndex.get(i);
+					if (newMin > buf) newMin = buf;
+					if (newMax < buf) newMax = buf;
+				}
+				buf = minIndex.get();
+				if (buf < newMin) {
+					while (buf < newMin) {
+						if (listRefSeq.size() == 0)
+							break;
+						listRefSeq.removeFirst();
+						buf++;
+					}
+					minIndex.set(newMin);
+				}
+				buf = maxIndex.get();
+				if (buf < newMax + 1) {
+					while(buf > newMax) {
+						listRefSeq.add(refWalker.get((int)(buf++)));
+					}
+					maxIndex.set(newMax);
+				}
+				haveNewIndex.set(false);
+        	}
             try {
                 infoQueue.put(iterator.next());
             } catch (InterruptedException e) {
@@ -202,10 +277,11 @@ public class CollectWgsMetrics extends CommandLineProgram {
                 e.printStackTrace();
                 System.exit(1);
             }
-            if (usingStopAfter && countNonNReads.incrementAndGet() > stopAfter)
+            if (usingStopAfter && countNonNReads.incrementAndGet() > stopAfter) {
                 break;
+            }
         }
-        
+        endOfRead = 0;
         //adding pills
         for(int i = 0; i < processThreadNum; i++) {
         	try {
@@ -217,6 +293,12 @@ public class CollectWgsMetrics extends CommandLineProgram {
         }
         
         //close BAM file
+        try {
+			refWalker.close();
+		} catch (IOException e1) {
+			e1.printStackTrace();
+			System.exit(1);
+		}
         iterator.close();
         
         //wait for end of work processing threads

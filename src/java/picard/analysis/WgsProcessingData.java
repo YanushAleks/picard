@@ -1,18 +1,18 @@
 package picard.analysis;
 
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 
 import htsjdk.samtools.reference.ReferenceSequence;
-import htsjdk.samtools.reference.ReferenceSequenceFileWalker;
 import htsjdk.samtools.util.ProgressLogger;
 import htsjdk.samtools.util.SamLocusIterator;
 
 public class WgsProcessingData implements Runnable {
 
-	private ReferenceSequenceFileWalker buferRefWalker;
 	private LinkedBlockingQueue<SamLocusIterator.LocusInfo> infoQueue;
 	private AtomicLong basesExcludedByBaseq;
 	private AtomicLong basesExcludedByOverlap;
@@ -29,15 +29,25 @@ public class WgsProcessingData implements Runnable {
 	
 	private boolean usingStopAfter;
 	
-	public WgsProcessingData(ReferenceSequenceFileWalker refWalker, 
+	private AtomicBoolean haveNewIndex;
+	private AtomicLongArray thCurIndex;
+	private LinkedList<ReferenceSequence> listRefSeq;
+	private final int threadNumber;
+	private AtomicLong minIndex;
+	
+	public WgsProcessingData(LinkedList<ReferenceSequence> listRefSeq, 
+			AtomicLongArray thCurIndex, AtomicBoolean haveNewIndex,
+			AtomicLong minIndex, 
 			LinkedBlockingQueue<SamLocusIterator.LocusInfo> infoQueue, 
 			AtomicLong basesExcludedByBaseq, AtomicLong basesExcludedByOverlap,
 			AtomicLong basesExcludedByCapping, AtomicLongArray HistogramArray,
 			AtomicLongArray baseQHistogramArray, int MINIMUM_BASE_QUALITY, 
 			int max, final ProgressLogger progress, AtomicLong countNonNReads, 
-			boolean usingStopAfter) {
+			boolean usingStopAfter, int threadNumber) {
 		
-		this.buferRefWalker = refWalker;
+		this.listRefSeq = listRefSeq;
+		this.thCurIndex = thCurIndex;
+		this.haveNewIndex = haveNewIndex;
 		this.infoQueue = infoQueue;
 		this.basesExcludedByBaseq = basesExcludedByBaseq;
 		this.basesExcludedByOverlap = basesExcludedByOverlap;
@@ -49,6 +59,8 @@ public class WgsProcessingData implements Runnable {
 		this.progress = progress;
 		this.countNonNReads = countNonNReads;
 		this.usingStopAfter = usingStopAfter;
+		this.threadNumber = threadNumber;
+		this.minIndex = minIndex;
 	}
 	
 	@Override
@@ -66,7 +78,11 @@ public class WgsProcessingData implements Runnable {
             if (info.getPosition() == -1) return;
             
             //data processing
-            final ReferenceSequence ref = buferRefWalker.get(info.getSequenceIndex());
+            long buferInfoIndex = info.getSequenceIndex();
+            long buferIndex = thCurIndex.getAndSet(this.threadNumber, buferInfoIndex);
+            if (buferIndex != buferInfoIndex)
+            	this.haveNewIndex.set(true);
+            final ReferenceSequence ref = this.listRefSeq.get((int)(buferInfoIndex - minIndex.get()));
             final byte base = ref.getBases()[info.getPosition() - 1];
             if (base == 'N') {
                 if (this.usingStopAfter)
